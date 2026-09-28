@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Voxel Grid Drawer — Editable 3D Voxel Figure Tool</title>
+<meta name="description" content="A browser-based tool for drawing editable 3D voxel-grid illustrations and exporting SVG, PNG, JSON, and editable PowerPoint files.">
+<style>
+:root{--bg:#f5f6f8;--panel:#fff;--text:#20242a;--muted:#666;--line:#d8dce3}
+*{box-sizing:border-box} html,body{height:100%} body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);overflow:hidden}
+.app{display:grid;grid-template-columns:370px 1fr;height:100vh;overflow:hidden}
+.panel{background:#fff;border-right:1px solid var(--line);padding:18px;height:100vh;overflow-y:auto;overflow-x:hidden}
+h1{font-size:18px;margin:0 0 10px} h2{font-size:14px;margin:18px 0 8px} h3{font-size:13px;margin:0 0 8px}
+.hint{font-size:12px;line-height:1.55;color:var(--muted)}
+.row{display:grid;grid-template-columns:1fr 126px;gap:10px;align-items:center;margin:8px 0}
+label{font-size:13px;color:#353941}
+input,select,button{width:100%;height:34px;border:1px solid #cbd0d8;border-radius:7px;background:#fff;padding:5px 8px}
+input[type=color]{padding:2px} button{cursor:pointer}.primary{background:#20242a;color:#fff;border-color:#20242a}.danger{color:#9d1d1d}
+.subpanel{padding:10px;border:1px solid #e7eaf0;border-radius:8px;background:#fbfcfd;margin:10px 0}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}.three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.sep{height:1px;background:#eceef2;margin:14px 0}
+.voxList{max-height:180px;overflow:auto;border:1px solid #e0e3e8;border-radius:7px;padding:6px}
+.voxItem{display:grid;grid-template-columns:1fr 42px 28px;gap:6px;align-items:center;font-size:12px;padding:4px}.swatch{height:20px;border-radius:4px;border:1px solid #bbb}
+.canvasWrap{min-width:0;height:100vh;padding:24px;display:flex;align-items:center;justify-content:center;overflow:auto}
+.stageBox{position:relative;width:min(100%,1100px);user-select:none}
+#stage{display:block;width:100%;height:auto;background:#fff;box-shadow:0 4px 22px rgba(0,0,0,.06);touch-action:pan-x pan-y}
+.badge{position:absolute;left:12px;top:12px;background:rgba(255,255,255,.9);border:1px solid #dfe3e8;border-radius:8px;padding:7px 9px;font-size:12px;line-height:1.45;color:#555;pointer-events:none}
+.viewBtns{position:absolute;right:12px;top:12px;display:flex;gap:6px}.viewBtns button{width:auto;height:30px;padding:3px 9px;background:rgba(255,255,255,.92);font-size:12px}
+.status{margin-top:8px;font-size:12px;color:#666;text-align:center}
+@media(max-width:900px){.app{grid-template-columns:1fr;grid-template-rows:auto 1fr}.panel{border-right:0;border-bottom:1px solid var(--line);height:auto;max-height:42vh}.canvasWrap{height:58vh}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="panel">
+<h1>Voxel Grid Drawer</h1>
+<div class="hint" style="margin-bottom:10px"><b>论文立体体素示意图绘制工具</b><br>纯前端运行；图形与工程数据不会上传到服务器。</div>
+<div class="hint">
+<b>右键拖动</b>：旋转视角　<b>滚轮</b>：缩放<br>
+<b>Shift + 右键拖动</b>：平移　双击画布：重置视角<br>
+<b>论文示意视图</b>：正面保持完整且不变形，右侧面和上侧面仅作示意性形变。<br>
+<b>导出可编辑 PPT</b>：线段、体素面和坐标轴均作为独立 PowerPoint 对象导出。
+</div>
+
+<h2>网格尺寸</h2>
+<div class="row"><label>X 方向格数</label><input id="nx" type="number" min="1" max="20" value="5"></div>
+<div class="row"><label>Y 方向格数</label><input id="ny" type="number" min="1" max="20" value="5"></div>
+<div class="row"><label>Z 方向格数</label><input id="nz" type="number" min="1" max="20" value="5"></div>
+<div class="row"><label>背景</label><input id="bgColor" type="color" value="#ffffff"></div>
+
+<h2>投影 / 视角</h2>
+<div class="subpanel">
+<div class="row"><label>视图类型</label><select id="projMode"><option value="3d" selected>自由旋转 3D 视图</option><option value="schematic">论文示意视图（正面不变形）</option></select></div>
+<div class="row"><label>示意视图深度横向偏移</label><input id="obliqueDx" type="number" min="-2" max="2" step="0.05" value="0.60"></div>
+<div class="row"><label>示意视图深度纵向偏移</label><input id="obliqueDy" type="number" min="-2" max="2" step="0.05" value="0.45"></div>
+<div class="row"><label>Z 轴长度比例</label><input id="zScale" type="number" min="0.05" max="5" step="0.05" value="1.00"></div>
+<div class="hint">“横向/纵向偏移”控制 Z 轴的投影方向；“Z 轴长度比例”只控制侧边深度的长短，不改变正面的宽高与网格形状。1.00 为默认长度。</div>
+</div>
+
+<h2>外侧可见线段</h2>
+<div class="subpanel">
+<div class="row"><label>颜色</label><input id="visColor" type="color" value="#303840"></div>
+<div class="row"><label>粗细</label><input id="visWidth" type="number" min=".2" max="8" step=".1" value="1.3"></div>
+<div class="row"><label>透明度</label><input id="visOpacity" type="number" min=".05" max="1" step=".05" value="1"></div>
+<div class="row"><label>线型</label><select id="visDashType"><option value="solid">实线</option><option value="dashed">虚线</option><option value="dotted">点线</option><option value="custom">自定义</option></select></div>
+<div class="row"><label>自定义 dasharray</label><input id="visDashCustom" value="8 4"></div>
+</div>
+
+<h2>内部 / 被遮挡线段</h2>
+<div class="subpanel">
+<div class="row"><label>颜色</label><input id="hidColor" type="color" value="#a0a5ab"></div>
+<div class="row"><label>粗细</label><input id="hidWidth" type="number" min=".2" max="8" step=".1" value=".8"></div>
+<div class="row"><label>透明度</label><input id="hidOpacity" type="number" min=".05" max="1" step=".05" value=".9"></div>
+<div class="row"><label>线型</label><select id="hidDashType"><option value="solid">实线</option><option value="dashed" selected>虚线</option><option value="dotted">点线</option><option value="custom">自定义</option></select></div>
+<div class="row"><label>自定义 dasharray</label><input id="hidDashCustom" value="5 4"></div>
+</div>
+
+
+<h2>坐标轴</h2>
+<div class="subpanel">
+<div class="row"><label>显示坐标轴</label><select id="axisVisible"><option value="yes" selected>显示</option><option value="no">隐藏</option></select></div>
+<div class="row"><label>显示方式</label><select id="axisMode"><option value="triad" selected>左下角方向坐标轴</option><option value="attached">附着到体素坐标原点</option></select></div>
+<div class="row"><label>轴线粗细</label><input id="axisWidth" type="number" min=".5" max="8" step=".1" value="2.2"></div>
+<div class="row"><label>箭头大小</label><input id="axisArrow" type="number" min="3" max="20" step="1" value="8"></div>
+<div class="row"><label>标签字号</label><input id="axisFont" type="number" min="8" max="36" step="1" value="16"></div>
+<div class="row"><label>X 轴颜色</label><input id="axisXColor" type="color" value="#c94b45"></div>
+<div class="row"><label>Y 轴颜色</label><input id="axisYColor" type="color" value="#4b8f59"></div>
+<div class="row"><label>Z 轴颜色</label><input id="axisZColor" type="color" value="#4c72b0"></div>
+<div class="row"><label>X 轴标签</label><input id="axisXLabel" value="X"></div>
+<div class="row"><label>Y 轴标签</label><input id="axisYLabel" value="Y"></div>
+<div class="row"><label>Z 轴标签</label><input id="axisZLabel" value="Z"></div>
+<div class="row"><label>方向轴长度</label><input id="axisLength" type="number" min=".4" max="3" step=".1" value="1"></div>
+</div>
+
+<h2>添加彩色体素</h2>
+<div class="hint">坐标从 0 开始。x / y / z 均对应体素索引。</div>
+<div class="three">
+<div class="row" style="grid-template-columns:1fr 58px"><label>x</label><input id="vx" type="number" min="0" value="1"></div>
+<div class="row" style="grid-template-columns:1fr 58px"><label>y</label><input id="vy" type="number" min="0" value="1"></div>
+<div class="row" style="grid-template-columns:1fr 58px"><label>z</label><input id="vz" type="number" min="0" value="1"></div>
+</div>
+<div class="row"><label>颜色</label><input id="vcolor" type="color" value="#55bfc1"></div>
+<div class="row"><label>体素透明度</label><input id="alpha" type="number" min=".05" max="1" step=".05" value=".34"></div>
+<button id="add" class="primary">添加 / 更新体素</button>
+
+
+<h2>一键自动上色</h2>
+<div class="subpanel">
+<div class="row"><label>上色模式</label><select id="autoMode">
+<option value="random" selected>均匀随机稀疏</option>
+<option value="center">中心聚集随机</option>
+<option value="all">全部体素</option>
+<option value="existing">仅重新着色已有体素</option>
+</select></div>
+<div class="row"><label>上色体素数量</label><input id="autoCount" type="number" min="1" max="8000" step="1" value="8"></div>
+<div class="row"><label>自动上色透明度</label><input id="autoAlpha" type="number" min=".05" max="1" step=".05" value=".34"></div>
+<div class="row"><label>执行前处理</label><select id="autoReplace">
+<option value="replace" selected>清空已有体素后生成</option>
+<option value="append">保留已有体素并追加</option>
+</select></div>
+<div class="hint" style="margin:8px 0 5px"><b>调色板</b>：自动上色时从下面四种颜色中随机选择。</div>
+<div class="two">
+<div class="row" style="grid-template-columns:1fr 58px"><label>颜色 1</label><input id="autoColor1" type="color" value="#55bfc1"></div>
+<div class="row" style="grid-template-columns:1fr 58px"><label>颜色 2</label><input id="autoColor2" type="color" value="#9fca6d"></div>
+<div class="row" style="grid-template-columns:1fr 58px"><label>颜色 3</label><input id="autoColor3" type="color" value="#e1d99a"></div>
+<div class="row" style="grid-template-columns:1fr 58px"><label>颜色 4</label><input id="autoColor4" type="color" value="#76c7d0"></div>
+</div>
+<button id="autoColorBtn" class="primary" type="button">一键自动上色</button>
+<div class="hint" style="margin-top:7px">“中心聚集随机”会提高中心区域体素被选中的概率，同时保留少量外围体素，更适合论文中的稀疏激活示意。</div>
+</div>
+
+<h2>当前体素</h2>
+<div id="voxList" class="voxList"></div>
+<div class="two" style="margin-top:8px"><button id="demo">载入示例</button><button id="clear" class="danger">清空体素</button></div>
+
+<div class="sep"></div>
+<h2>保存 / 下载</h2>
+<div class="two"><button id="saveSvg">保存 SVG</button><button id="savePng">保存 PNG</button></div>
+<div class="two" style="margin-top:8px"><button id="savePpt">导出可编辑 PPT</button><button id="saveJson">保存工程 JSON</button></div>
+<div class="two" style="margin-top:8px"><button id="loadJson">载入工程 JSON</button><span></span></div>
+<input id="jsonFile" type="file" accept=".json,application/json" hidden>
+
+<div class="sep"></div>
+<details style="font-size:12px;line-height:1.6;color:#555">
+  <summary style="cursor:pointer;font-weight:600">使用说明</summary>
+  <div style="padding-top:8px">
+    1. 设置 X / Y / Z 网格尺寸。<br>
+    2. 选择自由 3D 或论文示意视图。<br>
+    3. 按坐标添加体素，并设置颜色与透明度。<br>
+    4. 分别设置外侧线和内部/遮挡线的样式。<br>
+    5. 调整到满意视角后导出 SVG、PNG 或可编辑 PPT。<br>
+    6. 用工程 JSON 保存当前配置，之后可继续编辑。
+  </div>
+</details>
+<div class="hint" style="margin-top:14px;padding-bottom:6px">
+  Voxel Grid Drawer · v1.1.0 · Static web app
+</div>
+
+</aside>
+
+<main class="canvasWrap">
+<div class="stageBox">
+<svg id="stage" viewBox="0 0 1100 850" xmlns="http://www.w3.org/2000/svg" aria-label="可旋转的三维体素网格"></svg>
+<div class="badge">右键拖动：旋转<br>Shift + 右键：平移<br>滚轮：缩放</div>
+<div class="viewBtns"><button type="button" id="resetView">重置视角</button><button type="button" id="frontView">正视</button><button type="button" id="isoView">等轴</button><button type="button" id="paperView">论文视图</button></div>
+<div class="status" id="status"></div>
+</div>
+</main>
+</div>
+
+<script src="./jszip.min.js"></script>
+<script>
+const $=id=>document.getElementById(id), stage=$('stage');
+let voxels=[];
+let view={yaw:-35*Math.PI/180,pitch:25*Math.PI/180,zoom:1,panX:0,panY:0};
+
+function num(id,min,max,fallback){
+  let v=parseFloat($(id).value); if(!Number.isFinite(v))v=fallback; return Math.max(min,Math.min(max,v));
+}
+function cfg(){
+ return {
+  nx:Math.round(num('nx',1,20,5)),ny:Math.round(num('ny',1,20,5)),nz:Math.round(num('nz',1,20,5)),
+  bg:$('bgColor').value,
+  projMode:$('projMode').value,
+  obliqueDx:num('obliqueDx',-2,2,.60),
+  obliqueDy:num('obliqueDy',-2,2,.45),
+  zScale:num('zScale',.05,5,1.00),
+  visColor:$('visColor').value,visWidth:num('visWidth',.2,8,1.3),visOpacity:num('visOpacity',.05,1,1),
+  visDashType:$('visDashType').value,visDashCustom:$('visDashCustom').value.trim(),
+  hidColor:$('hidColor').value,hidWidth:num('hidWidth',.2,8,.8),hidOpacity:num('hidOpacity',.05,1,.9),
+  hidDashType:$('hidDashType').value,hidDashCustom:$('hidDashCustom').value.trim(),
+  axisVisible:$('axisVisible').value==='yes',
+  axisMode:$('axisMode').value,
+  axisWidth:num('axisWidth',.5,8,2.2),
+  axisArrow:num('axisArrow',3,20,8),
+  axisFont:num('axisFont',8,36,16),
+  axisXColor:$('axisXColor').value,
+  axisYColor:$('axisYColor').value,
+  axisZColor:$('axisZColor').value,
+  axisXLabel:$('axisXLabel').value || 'X',
+  axisYLabel:$('axisYLabel').value || 'Y',
+  axisZLabel:$('axisZLabel').value || 'Z',
+  axisLength:num('axisLength',.4,3,1)
+ };
+}
+function dash(t,c){return t==='solid'?'':t==='dashed'?'8 5':t==='dotted'?'1 5':(c||'6 4')}
+function rotPoint(x,y,z){
+ const cy=Math.cos(view.yaw),sy=Math.sin(view.yaw),cp=Math.cos(view.pitch),sp=Math.sin(view.pitch);
+ let x1=cy*x+sy*z, z1=-sy*x+cy*z;
+ let y1=cp*y-sp*z1, z2=sp*y+cp*z1;
+ return [x1,y1,z2];
+}
+function rotNormal(x,y,z){return rotPoint(x,y,z)}
+function projectUnitVec(v,C){
+ if(C.projMode==='schematic'){
+   const [x,y,z]=v;
+   return [x + z*C.zScale*C.obliqueDx, y + z*C.zScale*C.obliqueDy, z*C.zScale];
+ }
+ return rotNormal(v[0],v[1],v[2]);
+}
+function geometry(C){
+ const pts=[];
+ for(const x of [0,C.nx])for(const y of [0,C.ny])for(const z of [0,C.nz]){
+   if(C.projMode==='schematic'){
+     pts.push([x + z*C.zScale*C.obliqueDx, y + z*C.zScale*C.obliqueDy, z*C.zScale]);
+   }else{
+     pts.push(rotPoint(x-C.nx/2,y-C.ny/2,z-C.nz/2));
+   }
+ }
+ const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);
+ const bw=Math.max(...xs)-Math.min(...xs)||1,bh=Math.max(...ys)-Math.min(...ys)||1;
+ const scale=Math.min(820/bw,620/bh)*view.zoom;
+ if(C.projMode==='schematic'){
+   return {scale,cx:550-((Math.min(...xs)+Math.max(...xs))/2)*scale+view.panX,cy:425+((Math.min(...ys)+Math.max(...ys))/2)*scale+view.panY};
+ }
+ return {scale,cx:550+view.panX,cy:425+view.panY};
+}
+function project(x,y,z,C,G){
+ if(C.projMode==='schematic'){
+   const u=x + z*C.zScale*C.obliqueDx, v=y + z*C.zScale*C.obliqueDy;
+   return [G.cx+u*G.scale,G.cy-v*G.scale,z*C.zScale];
+ }
+ const p=rotPoint(x-C.nx/2,y-C.ny/2,z-C.nz/2);
+ return [G.cx+p[0]*G.scale,G.cy-p[1]*G.scale,p[2]];
+}
+function depth(x,y,z,C){
+ if(C.projMode==='schematic') return z*C.zScale + 0.001*x + 0.0001*y;
+ return rotPoint(x-C.nx/2,y-C.ny/2,z-C.nz/2)[2];
+}
+function normalFacing(nx,ny,nz,C){
+ if(C.projMode==='schematic'){
+   if(nx===1||ny===1||nz===-1) return true; // right, top, front
+   return false;
+ }
+ return rotNormal(nx,ny,nz)[2] > 1e-8;
+}
+function visibleBoundarySegment(s,C){
+ if(C.projMode==='schematic'){
+   const onFront=(s.z1===0&&s.z2===0);
+   const onTop=(s.y1===C.ny&&s.y2===C.ny);
+   const onRight=(s.x1===C.nx&&s.x2===C.nx);
+   return onFront||onTop||onRight;
+ }
+ const faces=[];
+ if(s.x1===0&&s.x2===0) faces.push([-1,0,0]);
+ if(s.x1===C.nx&&s.x2===C.nx) faces.push([1,0,0]);
+ if(s.y1===0&&s.y2===0) faces.push([0,-1,0]);
+ if(s.y1===C.ny&&s.y2===C.ny) faces.push([0,1,0]);
+ if(s.z1===0&&s.z2===0) faces.push([0,0,-1]);
+ if(s.z1===C.nz&&s.z2===C.nz) faces.push([0,0,1]);
+ return faces.some(n=>normalFacing(...n,C));
+}
+function segs(C,G){
+ const out=[];
+ const add=(x1,y1,z1,x2,y2,z2)=>{
+   const s={x1,y1,z1,x2,y2,z2}, a=project(x1,y1,z1,C,G),b=project(x2,y2,z2,C,G);
+   out.push({a,b,visible:visibleBoundarySegment(s,C),d:(a[2]+b[2])/2});
+ };
+ for(let z=0;z<=C.nz;z++)for(let y=0;y<=C.ny;y++)for(let x=0;x<C.nx;x++)add(x,y,z,x+1,y,z);
+ for(let z=0;z<=C.nz;z++)for(let x=0;x<=C.nx;x++)for(let y=0;y<C.ny;y++)add(x,y,z,x,y+1,z);
+ for(let x=0;x<=C.nx;x++)for(let y=0;y<=C.ny;y++)for(let z=0;z<C.nz;z++)add(x,y,z,x,y,z+1);
+ return out;
+}
+function hexRgb(h){let n=parseInt(h.slice(1),16);return[(n>>16)&255,(n>>8)&255,n&255]}
+function shade(h,f){let [r,g,b]=hexRgb(h),mix=f>=1?255:0,k=Math.min(Math.abs(f-1),1),q=v=>Math.round(v*(1-k)+mix*k);return`rgb(${q(r)},${q(g)},${q(b)})`}
+function polygon(ps,fill,a){return `<polygon points="${ps.map(p=>p[0]+','+p[1]).join(' ')}" fill="${fill}" fill-opacity="${a}" stroke="none"/>`}
+function voxelFaces(v,C,G){
+ const x=v.x,y=v.y,z=v.z,q=(X,Y,Z)=>project(X,Y,Z,C,G);
+ const faces=[
+  {n:[-1,0,0],p:[[x,y,z],[x,y+1,z],[x,y+1,z+1],[x,y,z+1]],shade:.8},
+  {n:[1,0,0],p:[[x+1,y,z],[x+1,y,z+1],[x+1,y+1,z+1],[x+1,y+1,z]],shade:.82},
+  {n:[0,-1,0],p:[[x,y,z],[x,y,z+1],[x+1,y,z+1],[x+1,y,z]],shade:.72},
+  {n:[0,1,0],p:[[x,y+1,z],[x+1,y+1,z],[x+1,y+1,z+1],[x,y+1,z+1]],shade:1.12},
+  {n:[0,0,-1],p:[[x,y,z],[x+1,y,z],[x+1,y+1,z],[x,y+1,z]],shade:.92},
+  {n:[0,0,1],p:[[x,y,z+1],[x,y+1,z+1],[x+1,y+1,z+1],[x+1,y,z+1]],shade:1.02}
+ ];
+ return faces.filter(f=>normalFacing(...f.n,C)).map(f=>polygon(f.p.map(p=>q(...p)),shade(v.color,f.shade),v.alpha)).join('');
+}
+
+function xmlEsc(s){
+ return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+}
+function axesSvg(C,G){
+ if(!C.axisVisible) return '';
+ const defs=`<defs>
+  <marker id="axX" markerWidth="${C.axisArrow}" markerHeight="${C.axisArrow}" refX="${C.axisArrow-1}" refY="${C.axisArrow/2}" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L${C.axisArrow},${C.axisArrow/2} L0,${C.axisArrow} z" fill="${C.axisXColor}"/></marker>
+  <marker id="axY" markerWidth="${C.axisArrow}" markerHeight="${C.axisArrow}" refX="${C.axisArrow-1}" refY="${C.axisArrow/2}" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L${C.axisArrow},${C.axisArrow/2} L0,${C.axisArrow} z" fill="${C.axisYColor}"/></marker>
+  <marker id="axZ" markerWidth="${C.axisArrow}" markerHeight="${C.axisArrow}" refX="${C.axisArrow-1}" refY="${C.axisArrow/2}" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L${C.axisArrow},${C.axisArrow/2} L0,${C.axisArrow} z" fill="${C.axisZColor}"/></marker>
+ </defs>`;
+ const axes=[
+  {v:[1,0,0],color:C.axisXColor,label:C.axisXLabel,marker:'axX'},
+  {v:[0,1,0],color:C.axisYColor,label:C.axisYLabel,marker:'axY'},
+  {v:[0,0,1],color:C.axisZColor,label:C.axisZLabel,marker:'axZ'}
+ ];
+ let body='';
+ if(C.axisMode==='triad'){
+   const ox=100,oy=745,L=64*C.axisLength;
+   axes.forEach(a=>{
+     const r=projectUnitVec(a.v,C), ex=ox+r[0]*L, ey=oy-r[1]*L;
+     const mag=Math.hypot(ex-ox,ey-oy);
+     if(mag<2)return;
+     const ux=(ex-ox)/mag,uy=(ey-oy)/mag;
+     body+=`<line x1="${ox}" y1="${oy}" x2="${ex}" y2="${ey}" stroke="${a.color}" stroke-width="${C.axisWidth}" marker-end="url(#${a.marker})" vector-effect="non-scaling-stroke"/>`;
+     body+=`<text x="${ex+ux*14}" y="${ey+uy*14+5}" font-size="${C.axisFont}" font-family="Arial, sans-serif" font-weight="600" text-anchor="middle" fill="${a.color}">${xmlEsc(a.label)}</text>`;
+   });
+   body+=`<circle cx="${ox}" cy="${oy}" r="${Math.max(2,C.axisWidth*1.25)}" fill="#555"/>`;
+ }else{
+   const o=[0,0,0], L=Math.max(C.nx,C.ny,C.nz)*0.34*C.axisLength;
+   const op=project(...o,C,G);
+   axes.forEach(a=>{
+     const ep=project(o[0]+a.v[0]*L,o[1]+a.v[1]*L,o[2]+a.v[2]*L,C,G);
+     const dx=ep[0]-op[0],dy=ep[1]-op[1],mag=Math.hypot(dx,dy)||1,ux=dx/mag,uy=dy/mag;
+     body+=`<line x1="${op[0]}" y1="${op[1]}" x2="${ep[0]}" y2="${ep[1]}" stroke="${a.color}" stroke-width="${C.axisWidth}" marker-end="url(#${a.marker})" vector-effect="non-scaling-stroke"/>`;
+     body+=`<text x="${ep[0]+ux*14}" y="${ep[1]+uy*14+5}" font-size="${C.axisFont}" font-family="Arial, sans-serif" font-weight="600" text-anchor="middle" fill="${a.color}">${xmlEsc(a.label)}</text>`;
+   });
+   body+=`<circle cx="${op[0]}" cy="${op[1]}" r="${Math.max(2,C.axisWidth*1.25)}" fill="#555"/>`;
+ }
+ return defs+`<g id="axes">${body}</g>`;
+}
+
+function render(){
+ const C=cfg(),G=geometry(C), S=segs(C,G),vd=dash(C.visDashType,C.visDashCustom),hd=dash(C.hidDashType,C.hidDashCustom);
+ voxels=voxels.filter(v=>v.x>=0&&v.x<C.nx&&v.y>=0&&v.y<C.ny&&v.z>=0&&v.z<C.nz);
+ const sorted=[...voxels].sort((a,b)=>depth(a.x+.5,a.y+.5,a.z+.5,C)-depth(b.x+.5,b.y+.5,b.z+.5,C));
+ stage.innerHTML=`<style>
+ .v{stroke:${C.visColor};stroke-width:${C.visWidth};stroke-opacity:${C.visOpacity};fill:none;stroke-linecap:round;vector-effect:non-scaling-stroke;${vd?`stroke-dasharray:${vd};`:''}}
+ .h{stroke:${C.hidColor};stroke-width:${C.hidWidth};stroke-opacity:${C.hidOpacity};fill:none;stroke-linecap:round;vector-effect:non-scaling-stroke;${hd?`stroke-dasharray:${hd};`:''}}
+ </style><rect width="1100" height="850" fill="${C.bg}"/>
+ <g>${sorted.map(v=>voxelFaces(v,C,G)).join('')}</g>
+ <g>${S.filter(s=>!s.visible).map(s=>`<line class="h" x1="${s.a[0]}" y1="${s.a[1]}" x2="${s.b[0]}" y2="${s.b[1]}"/>`).join('')}</g>
+ <g>${S.filter(s=>s.visible).map(s=>`<line class="v" x1="${s.a[0]}" y1="${s.a[1]}" x2="${s.b[0]}" y2="${s.b[1]}"/>`).join('')}</g>
+ ${axesSvg(C,G)}`;
+ $('status').textContent=C.projMode==='schematic'
+   ? `论文示意视图 · Z长度 ${C.zScale.toFixed(2)}× · 深度方向 (${C.obliqueDx.toFixed(2)}, ${C.obliqueDy.toFixed(2)}) · Zoom ${view.zoom.toFixed(2)}×`
+   : `自由旋转 3D 视图 · Yaw ${(view.yaw*180/Math.PI).toFixed(1)}° · Pitch ${(view.pitch*180/Math.PI).toFixed(1)}° · Zoom ${view.zoom.toFixed(2)}×`;
+ refreshList();
+}
+function refreshList(){
+ const box=$('voxList');
+ box.innerHTML=voxels.length?voxels.map((v,i)=>`<div class="voxItem"><span>(${v.x}, ${v.y}, ${v.z}) · α=${v.alpha.toFixed(2)}</span><span class="swatch" style="background:${v.color}"></span><button type="button" data-del="${i}" style="height:24px;padding:0">×</button></div>`).join(''):'<div class="hint" style="padding:6px">暂无体素</div>';
+ box.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{voxels.splice(+b.dataset.del,1);render()}));
+}
+$('add').addEventListener('click',()=>{
+ const C=cfg(),x=Math.floor(+$('vx').value),y=Math.floor(+$('vy').value),z=Math.floor(+$('vz').value);
+ if(!Number.isFinite(x+y+z)||x<0||y<0||z<0||x>=C.nx||y>=C.ny||z>=C.nz){alert('坐标超出当前网格范围');return}
+ const color=$('vcolor').value,alpha=num('alpha',.05,1,.34),old=voxels.find(v=>v.x===x&&v.y===y&&v.z===z);
+ if(old){old.color=color;old.alpha=alpha}else voxels.push({x,y,z,color,alpha});render();
+});
+
+function autoPalette(){
+ return [$('autoColor1').value,$('autoColor2').value,$('autoColor3').value,$('autoColor4').value];
+}
+function voxelKey(v){return `${v.x},${v.y},${v.z}`;}
+function shuffled(arr){
+ const a=[...arr];
+ for(let i=a.length-1;i>0;i--){
+   const j=Math.floor(Math.random()*(i+1));
+   [a[i],a[j]]=[a[j],a[i]];
+ }
+ return a;
+}
+function weightedCenterSample(candidates,count,C){
+ const cx=(C.nx-1)/2,cy=(C.ny-1)/2,cz=(C.nz-1)/2;
+ const sx=Math.max(C.nx/3,1),sy=Math.max(C.ny/3,1),sz=Math.max(C.nz/3,1);
+ return candidates.map(v=>{
+   const d2=((v.x-cx)/sx)**2+((v.y-cy)/sy)**2+((v.z-cz)/sz)**2;
+   const w=.12+.88*Math.exp(-1.15*d2);
+   return {v,key:Math.pow(Math.random(),1/w)};
+ }).sort((a,b)=>b.key-a.key).slice(0,count).map(o=>o.v);
+}
+function autoColorVoxels(){
+ const C=cfg(),mode=$('autoMode').value,alpha=num('autoAlpha',.05,1,.34);
+ const palette=autoPalette(),replace=$('autoReplace').value==='replace';
+ let count=Math.max(1,Math.floor(num('autoCount',1,8000,8)));
+ if(mode==='existing'){
+   if(!voxels.length){alert('当前没有已着色体素可重新着色。');return;}
+   voxels=voxels.map(v=>({...v,color:palette[Math.floor(Math.random()*palette.length)],alpha}));
+   render(); return;
+ }
+ const occupied=new Set(replace?[]:voxels.map(voxelKey));
+ let candidates=[];
+ for(let x=0;x<C.nx;x++)for(let y=0;y<C.ny;y++)for(let z=0;z<C.nz;z++){
+   const v={x,y,z}; if(!occupied.has(voxelKey(v))) candidates.push(v);
+ }
+ if(mode==='all') count=candidates.length; else count=Math.min(count,candidates.length);
+ const picked=mode==='center'?weightedCenterSample(candidates,count,C):shuffled(candidates).slice(0,count);
+ const generated=picked.map(v=>({...v,color:palette[Math.floor(Math.random()*palette.length)],alpha}));
+ voxels=replace?generated:[...voxels,...generated];
+ render();
+}
+$('autoColorBtn').addEventListener('click',autoColorVoxels);
+$('autoMode').addEventListener('change',()=>{
+ const m=$('autoMode').value;
+ $('autoCount').disabled=(m==='all'||m==='existing');
+ $('autoReplace').disabled=(m==='existing');
+});
+
+$('demo').addEventListener('click',()=>{voxels=[
+{x:0,y:4,z:0,color:'#4eb7bd',alpha:.32},{x:1,y:4,z:0,color:'#4eb7bd',alpha:.32},
+{x:2,y:3,z:1,color:'#76c7d0',alpha:.30},{x:3,y:3,z:1,color:'#76c7d0',alpha:.30},
+{x:1,y:1,z:0,color:'#9fca6d',alpha:.36},{x:2,y:1,z:0,color:'#9fca6d',alpha:.36},
+{x:3,y:2,z:2,color:'#e1d99a',alpha:.30},{x:4,y:0,z:3,color:'#95c872',alpha:.36}
+];render()});
+$('clear').addEventListener('click',()=>{voxels=[];render()});
+['nx','ny','nz','bgColor','projMode','obliqueDx','obliqueDy','zScale','visColor','visWidth','visOpacity','visDashType','visDashCustom','hidColor','hidWidth','hidOpacity','hidDashType','hidDashCustom',
+'axisVisible','axisMode','axisWidth','axisArrow','axisFont','axisXColor','axisYColor','axisZColor',
+'axisXLabel','axisYLabel','axisZLabel','axisLength'].forEach(id=>$(id).addEventListener('input',render));
+
+function resetView(){view={yaw:-35*Math.PI/180,pitch:25*Math.PI/180,zoom:1,panX:0,panY:0};$('projMode').value='3d';render()}
+$('resetView').addEventListener('click',resetView);
+$('isoView').addEventListener('click',()=>{$('projMode').value='3d';view={yaw:-35*Math.PI/180,pitch:25*Math.PI/180,zoom:1,panX:0,panY:0};render()});
+$('frontView').addEventListener('click',()=>{$('projMode').value='3d';view={yaw:0,pitch:0,zoom:1,panX:0,panY:0};render()});
+$('paperView').addEventListener('click',()=>{$('projMode').value='schematic';view={yaw:0,pitch:0,zoom:1,panX:0,panY:0};render()});
+stage.addEventListener('dblclick',resetView);
+stage.addEventListener('contextmenu',e=>e.preventDefault());
+
+let drag=null;
+stage.addEventListener('pointerdown',e=>{
+ if(e.button!==2)return;
+ stage.setPointerCapture(e.pointerId);
+ drag={x:e.clientX,y:e.clientY,yaw:view.yaw,pitch:view.pitch,panX:view.panX,panY:view.panY,shift:e.shiftKey};
+});
+stage.addEventListener('pointermove',e=>{
+ if(!drag)return;
+ const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+ const C=cfg();
+ if(drag.shift||e.shiftKey||C.projMode==='schematic'){
+   view.panX=drag.panX+dx;view.panY=drag.panY+dy;
+ }else{
+   view.yaw=drag.yaw+dx*.008;
+   view.pitch=Math.max(-Math.PI/2+.02,Math.min(Math.PI/2-.02,drag.pitch+dy*.008));
+ }
+ render();
+});
+function endDrag(e){if(drag){drag=null;try{stage.releasePointerCapture(e.pointerId)}catch{}}}
+stage.addEventListener('pointerup',endDrag);stage.addEventListener('pointercancel',endDrag);
+stage.addEventListener('wheel',e=>{e.preventDefault();view.zoom=Math.max(.35,Math.min(3.5,view.zoom*Math.exp(-e.deltaY*.001)));render()},{passive:false});
+
+function download(name,blob){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+$('saveSvg').addEventListener('click',()=>{
+ const clone=stage.cloneNode(true);clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+ download('voxel_grid.svg',new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n'+clone.outerHTML],{type:'image/svg+xml'}));
+});
+$('savePng').addEventListener('click',()=>{
+ const clone=stage.cloneNode(true);clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+ const xml=new XMLSerializer().serializeToString(clone),url=URL.createObjectURL(new Blob([xml],{type:'image/svg+xml'})),img=new Image();
+ img.onload=()=>{const c=document.createElement('canvas');c.width=2200;c.height=1700;const ctx=c.getContext('2d');ctx.scale(2,2);ctx.drawImage(img,0,0,1100,850);c.toBlob(b=>download('voxel_grid.png',b),'image/png');URL.revokeObjectURL(url)};img.src=url;
+});
+
+function rgbToHex(s){
+ if(!s || s==='none') return '000000';
+ if(s[0]==='#') return s.slice(1).replace(/^([0-9a-f])([0-9a-f])([0-9a-f])$/i,'$1$1$2$2$3$3').toUpperCase();
+ const m=s.match(/rgba?\(([^)]+)\)/i);
+ if(!m) return '000000';
+ const nums=m[1].split(',').map(v=>parseFloat(v));
+ return nums.slice(0,3).map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('').toUpperCase();
+}
+function alphaVal(opacity){
+ let v=parseFloat(opacity);
+ if(!Number.isFinite(v)) v=1;
+ return Math.round(Math.max(0,Math.min(1,v))*100000);
+}
+function dashToPpt(v){
+ if(!v || v==='none') return '';
+ const nums=String(v).split(/[ ,]+/).map(parseFloat).filter(Number.isFinite);
+ if(nums.length>=2 && nums[0]<=2 && nums[1]>=3) return '<a:prstDash val="dot"/>';
+ return '<a:prstDash val="dash"/>';
+}
+function xmlAttr(s){return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
+function pptxContentTypes(){
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>
+<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>
+<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>`;
+}
+function pptRelsRoot(){
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`;
+}
+function pptPresentation(){
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>
+<p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst>
+<p:sldSz cx="12192000" cy="6858000" type="wide"/>
+<p:notesSz cx="6858000" cy="9144000"/>
+</p:presentation>`;
+}
+function pptPresentationRels(){
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>
+</Relationships>`;
+}
+function pptCore(){
+ const d=new Date().toISOString();
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<dc:title>Editable voxel grid</dc:title><dc:creator>Voxel Grid Tool</dc:creator>
+<cp:lastModifiedBy>Voxel Grid Tool</cp:lastModifiedBy>
+<dcterms:created xsi:type="dcterms:W3CDTF">${d}</dcterms:created>
+<dcterms:modified xsi:type="dcterms:W3CDTF">${d}</dcterms:modified>
+</cp:coreProperties>`;
+}
+function pptApp(){
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+<Application>Voxel Grid Tool</Application><PresentationFormat>Widescreen</PresentationFormat><Slides>1</Slides><Notes>0</Notes><HiddenSlides>0</HiddenSlides><ScaleCrop>false</ScaleCrop>
+</Properties>`;
+}
+function pptTheme(){
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme">
+<a:themeElements>
+<a:clrScheme name="Office"><a:dk1><a:srgbClr val="000000"/></a:dk1><a:lt1><a:srgbClr val="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F1F1F"/></a:dk2><a:lt2><a:srgbClr val="F2F2F2"/></a:lt2><a:accent1><a:srgbClr val="4472C4"/></a:accent1><a:accent2><a:srgbClr val="ED7D31"/></a:accent2><a:accent3><a:srgbClr val="A5A5A5"/></a:accent3><a:accent4><a:srgbClr val="FFC000"/></a:accent4><a:accent5><a:srgbClr val="5B9BD5"/></a:accent5><a:accent6><a:srgbClr val="70AD47"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></a:clrScheme>
+<a:fontScheme name="Office"><a:majorFont><a:latin typeface="Arial"/></a:majorFont><a:minorFont><a:latin typeface="Arial"/></a:minorFont></a:fontScheme>
+<a:fmtScheme name="Office"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme>
+</a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>`;
+}
+function pptSlideMaster(){
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+<p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></p:bgPr></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr></p:spTree></p:cSld>
+<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst><p:txStyles><p:titleStyle/><p:bodyStyle/><p:otherStyle/></p:txStyles></p:sldMaster>`;
+}
+function pptSlideMasterRels(){
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>
+</Relationships>`;
+}
+function pptSlideLayout(){
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="blank" preserve="1">
+<p:cSld name="Blank"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>`;
+}
+function pptSlideLayoutRels(){
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
+</Relationships>`;
+}
+function pptSlideRels(){return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>`;}
+
+function renderEditablePptShapes(){
+ const svgW=1100,svgH=850,slideW=12192000,slideH=6858000,margin=320000;
+ const scale=Math.min((slideW-2*margin)/svgW,(slideH-2*margin)/svgH);
+ const ox=(slideW-svgW*scale)/2,oy=(slideH-svgH*scale)/2;
+ const S=v=>Math.round(v*scale);
+ const X=v=>Math.round(ox+v*scale);
+ const Y=v=>Math.round(oy+v*scale);
+ let id=2,xml='';
+ const nodes=[...stage.querySelectorAll('rect,polygon,line,circle,text')];
+ nodes.forEach(el=>{
+   const tag=el.tagName.toLowerCase(), cs=getComputedStyle(el), name=tag+' '+id;
+   if(tag==='rect'){
+     const x=X(+el.getAttribute('x')||0),y=Y(+el.getAttribute('y')||0),w=S(+el.getAttribute('width')||1100),h=S(+el.getAttribute('height')||850);
+     const fill=rgbToHex(cs.fill), a=alphaVal(cs.fillOpacity);
+     xml+=`<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="${fill}"><a:alpha val="${a}"/></a:srgbClr></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>`;
+     id++;
+   }else if(tag==='line'){
+     const x1=X(+el.getAttribute('x1')),y1=Y(+el.getAttribute('y1')),x2=X(+el.getAttribute('x2')),y2=Y(+el.getAttribute('y2'));
+     const x=Math.min(x1,x2),y=Math.min(y1,y2),w=Math.max(1,Math.abs(x2-x1)),h=Math.max(1,Math.abs(y2-y1));
+     const flipH=x2<x1?' flipH="1"':'', flipV=y2<y1?' flipV="1"':'';
+     const col=rgbToHex(cs.stroke), a=alphaVal(cs.strokeOpacity), lw=Math.round((parseFloat(cs.strokeWidth)||1)*scale);
+     xml+=`<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm${flipH}${flipV}><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom><a:ln w="${Math.max(1270,lw)}"><a:solidFill><a:srgbClr val="${col}"><a:alpha val="${a}"/></a:srgbClr></a:solidFill>${dashToPpt(cs.strokeDasharray)}</a:ln></p:spPr></p:sp>`;
+     id++;
+   }else if(tag==='polygon'){
+     const pts=(el.getAttribute('points')||'').trim().split(/\s+/).map(p=>p.split(',').map(Number)).filter(p=>p.length===2&&p.every(Number.isFinite));
+     if(pts.length<3) return;
+     const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]),minX=Math.min(...xs),minY=Math.min(...ys),maxX=Math.max(...xs),maxY=Math.max(...ys);
+     const x=X(minX),y=Y(minY),w=Math.max(1,S(maxX-minX)),h=Math.max(1,S(maxY-minY));
+     const rel=pts.map(p=>[Math.round((p[0]-minX)/(maxX-minX||1)*100000),Math.round((p[1]-minY)/(maxY-minY||1)*100000)]);
+     const path=rel.map((p,i)=>i===0?`<a:moveTo><a:pt x="${p[0]}" y="${p[1]}"/></a:moveTo>`:`<a:lnTo><a:pt x="${p[0]}" y="${p[1]}"/></a:lnTo>`).join('')+'<a:close/>';
+     const fill=rgbToHex(cs.fill), a=alphaVal(cs.fillOpacity);
+     xml+=`<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="100000" b="100000"/><a:pathLst><a:path w="100000" h="100000">${path}</a:path></a:pathLst></a:custGeom><a:solidFill><a:srgbClr val="${fill}"><a:alpha val="${a}"/></a:srgbClr></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>`;
+     id++;
+   }else if(tag==='circle'){
+     const cx=+el.getAttribute('cx'),cy=+el.getAttribute('cy'),r=+el.getAttribute('r');
+     const x=X(cx-r),y=Y(cy-r),d=S(2*r),fill=rgbToHex(cs.fill),a=alphaVal(cs.fillOpacity);
+     xml+=`<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${d}" cy="${d}"/></a:xfrm><a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="${fill}"><a:alpha val="${a}"/></a:srgbClr></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>`;
+     id++;
+   }else if(tag==='text'){
+     const x=X(+el.getAttribute('x')-20),y=Y(+el.getAttribute('y')-20),w=S(40),h=S(40);
+     const fs=Math.round((parseFloat(cs.fontSize)||16)*100);
+     const fill=rgbToHex(cs.fill),txt=xmlAttr(el.textContent||'');
+     xml+=`<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" anchor="ctr"/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="${fs}" b="${cs.fontWeight>=600?'1':'0'}"><a:solidFill><a:srgbClr val="${fill}"/></a:solidFill><a:latin typeface="Arial"/></a:rPr><a:t>${txt}</a:t></a:r><a:endParaRPr lang="en-US" sz="${fs}"/></a:p></p:txBody></p:sp>`;
+     id++;
+   }
+ });
+ return xml;
+}
+function pptSlideXml(){
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+<p:cSld><p:spTree>
+<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
+${renderEditablePptShapes()}
+</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
+}
+async function exportEditablePptx(){
+ if(typeof JSZip==='undefined'){
+   alert('PPT 导出组件未加载。请确认 jszip.min.js 与 index.html 位于同一目录。');
+   return;
+ }
+ render();
+ const zip=new JSZip();
+ zip.file('[Content_Types].xml',pptxContentTypes());
+ zip.folder('_rels').file('.rels',pptRelsRoot());
+ zip.folder('docProps').file('core.xml',pptCore());
+ zip.folder('docProps').file('app.xml',pptApp());
+ zip.folder('ppt').file('presentation.xml',pptPresentation());
+ zip.folder('ppt').folder('_rels').file('presentation.xml.rels',pptPresentationRels());
+ zip.folder('ppt').folder('theme').file('theme1.xml',pptTheme());
+ zip.folder('ppt').folder('slideMasters').file('slideMaster1.xml',pptSlideMaster());
+ zip.folder('ppt').folder('slideMasters').folder('_rels').file('slideMaster1.xml.rels',pptSlideMasterRels());
+ zip.folder('ppt').folder('slideLayouts').file('slideLayout1.xml',pptSlideLayout());
+ zip.folder('ppt').folder('slideLayouts').folder('_rels').file('slideLayout1.xml.rels',pptSlideLayoutRels());
+ zip.folder('ppt').folder('slides').file('slide1.xml',pptSlideXml());
+ zip.folder('ppt').folder('slides').folder('_rels').file('slide1.xml.rels',pptSlideRels());
+ const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.presentationml.presentation'});
+ download('voxel_grid_editable.pptx',blob);
+}
+$('savePpt').addEventListener('click',exportEditablePptx);
+
+
+$('saveJson').addEventListener('click',()=>{
+ const data={version:8,settings:{
+ nx:$('nx').value,ny:$('ny').value,nz:$('nz').value,bgColor:$('bgColor').value,
+ projMode:$('projMode').value,obliqueDx:$('obliqueDx').value,obliqueDy:$('obliqueDy').value,zScale:$('zScale').value,
+ autoMode:$('autoMode').value,autoCount:$('autoCount').value,autoAlpha:$('autoAlpha').value,autoReplace:$('autoReplace').value,
+ autoColor1:$('autoColor1').value,autoColor2:$('autoColor2').value,autoColor3:$('autoColor3').value,autoColor4:$('autoColor4').value,
+ visColor:$('visColor').value,visWidth:$('visWidth').value,visOpacity:$('visOpacity').value,visDashType:$('visDashType').value,visDashCustom:$('visDashCustom').value,
+ hidColor:$('hidColor').value,hidWidth:$('hidWidth').value,hidOpacity:$('hidOpacity').value,hidDashType:$('hidDashType').value,hidDashCustom:$('hidDashCustom').value,
+ axisVisible:$('axisVisible').value,axisMode:$('axisMode').value,axisWidth:$('axisWidth').value,axisArrow:$('axisArrow').value,axisFont:$('axisFont').value,
+ axisXColor:$('axisXColor').value,axisYColor:$('axisYColor').value,axisZColor:$('axisZColor').value,
+ axisXLabel:$('axisXLabel').value,axisYLabel:$('axisYLabel').value,axisZLabel:$('axisZLabel').value,axisLength:$('axisLength').value
+ },view,voxels};
+ download('voxel_project.json',new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+});
+$('loadJson').addEventListener('click',()=>$('jsonFile').click());
+$('jsonFile').addEventListener('change',async e=>{
+ const f=e.target.files&&e.target.files[0];if(!f)return;
+ try{
+   const d=JSON.parse(await f.text());
+   if(d.settings)for(const [k,v] of Object.entries(d.settings))if($(k))$(k).value=v;
+   if(Array.isArray(d.voxels))voxels=d.voxels;
+   if(d.view)view={...view,...d.view};
+   render();
+ }catch(err){alert('工程文件无法读取：'+err.message)}
+ e.target.value='';
+});
+render();
+</script>
+</body>
+</html>
