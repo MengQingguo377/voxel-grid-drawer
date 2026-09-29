@@ -1,10 +1,13 @@
 # Voxel Grid Drawer
 
-A pure front-end browser tool for creating academic 3D voxel-grid illustrations.
+A pure front-end browser tool for creating academic 3D voxel-grid and event-stream illustrations.
 
 ## Features
 
 - Adjustable X / Y / Z voxel-grid dimensions
+- Event-stream mode with red/blue event points inside a 3D spatiotemporal volume
+- Reproducible uniform, clustered, and alternating-band event distributions
+- Paper-oriented event-stream view with editable time arrow, slice ticks, and labels
 - Free-rotation 3D view
 - Paper-oriented schematic projection with an undistorted front face
 - Adjustable Z-axis visual length
@@ -16,7 +19,7 @@ A pure front-end browser tool for creating academic 3D voxel-grid illustrations.
   - grid lines remain individual PowerPoint line objects
   - voxel faces remain individual editable vector shapes
   - axis lines and labels are editable
-- Save/load project configuration as JSON
+- Save/load voxel and event-stream project configuration as JSON
 - No backend or database required
 
 ## Local use
