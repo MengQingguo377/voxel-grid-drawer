@@ -93,6 +93,7 @@ input[type=color]{padding:2px} button{cursor:pointer}.primary{background:var(--a
 <h2>论文标注</h2>
 <div class="subpanel">
 <div class="row"><label>切片刻度数</label><input id="eventSlices" type="number" min="0" max="20" step="1" value="8"></div>
+<div class="row"><label>分层线型</label><select id="eventLayerStyle"><option value="solid" selected>实线</option><option value="dashed">虚线</option></select></div>
 <div class="row"><label>时间轴标签</label><input id="eventTimeLabel" value="Time"></div>
 <div class="row"><label>图形标题</label><input id="eventTitle" value="Event Stream"></div>
 <div class="row"><label>显示标注</label><select id="eventLabels"><option value="yes" selected>显示</option><option value="no">隐藏</option></select></div>
@@ -252,6 +253,7 @@ function cfg(){
   eventColorA:$('eventColorA').value,
   eventColorB:$('eventColorB').value,
   eventSlices:Math.round(num('eventSlices',0,20,8)),
+  eventLayerStyle:$('eventLayerStyle').value,
   eventTimeLabel:$('eventTimeLabel').value || 'Time',
   eventTitle:$('eventTitle').value || 'Event Stream',
   eventLabels:$('eventLabels').value==='yes'
@@ -388,16 +390,18 @@ function generateEventStream(){
  render();
 }
 function eventFrameSegments(C,G){
- const lines=[],add=(x1,y1,z1,x2,y2,z2,visible=true)=>{
-   const a=project(x1,y1,z1,C,G),b=project(x2,y2,z2,C,G);lines.push({a,b,visible});
+ const lines=[],add=(x1,y1,z1,x2,y2,z2,visible=true,layer=false)=>{
+   const a=project(x1,y1,z1,C,G),b=project(x2,y2,z2,C,G);lines.push({a,b,visible,layer});
  };
- for(const y of [0,C.ny])for(const z of [0,C.nz])add(0,y,z,C.nx,y,z,y===0||z===0);
+ // 后表面（z=nz）的上边保持实线、下边使用隐藏线样式；前表面边线均为实线。
+ for(const y of [0,C.ny])for(const z of [0,C.nz])add(0,y,z,C.nx,y,z,z===0||y===C.ny);
  for(const x of [0,C.nx])for(const z of [0,C.nz])add(x,0,z,x,C.ny,z,x===C.nx||z===0);
  for(const x of [0,C.nx])for(const y of [0,C.ny])add(x,y,0,x,y,C.nz,x===C.nx||y===C.ny);
  for(let i=1;i<=C.eventSlices;i++){
-   const z=C.nz*i/(C.eventSlices+1),tickX=Math.min(.68,C.nx*.14),tickY=Math.min(.68,C.ny*.14);
-   add(0,C.ny,z,tickX,C.ny,z,true);
-   add(C.nx,0,z,C.nx,tickY,z,true);
+   const z=C.nz*i/(C.eventSlices+1);
+   // 每个时间切片在上表面和右侧面绘制贯穿截面的完整线段。
+   add(0,C.ny,z,C.nx,C.ny,z,true,true);
+   add(C.nx,0,z,C.nx,C.ny,z,true,true);
  }
  return lines;
 }
@@ -414,10 +418,11 @@ function eventLabelsSvg(C,G){
 }
 function eventStreamSvg(C,G,vd,hd){
  const F=eventFrameSegments(C,G),sorted=[...eventPoints].sort((a,b)=>depth(a.x,a.y,a.z,C)-depth(b.x,b.y,b.z,C));
- const back=F.filter(s=>!s.visible).map(s=>`<line class="h" x1="${s.a[0]}" y1="${s.a[1]}" x2="${s.b[0]}" y2="${s.b[1]}"/>`).join('');
+ const back=F.filter(s=>!s.layer&&!s.visible).map(s=>`<line class="h" x1="${s.a[0]}" y1="${s.a[1]}" x2="${s.b[0]}" y2="${s.b[1]}"/>`).join('');
  const dots=sorted.map(p=>{const q=project(p.x,p.y,p.z,C,G);return `<circle cx="${q[0]}" cy="${q[1]}" r="${C.eventRadius}" fill="${p.kind===0?C.eventColorA:C.eventColorB}" fill-opacity="${C.eventOpacity}"/>`}).join('');
- const front=F.filter(s=>s.visible).map(s=>`<line class="v" x1="${s.a[0]}" y1="${s.a[1]}" x2="${s.b[0]}" y2="${s.b[1]}"/>`).join('');
- return `<g>${back}</g><g>${dots}</g><g>${front}</g>${eventLabelsSvg(C,G)}`;
+ const layers=F.filter(s=>s.layer).map(s=>`<line class="layer" x1="${s.a[0]}" y1="${s.a[1]}" x2="${s.b[0]}" y2="${s.b[1]}"/>`).join('');
+ const front=F.filter(s=>!s.layer&&s.visible).map(s=>`<line class="v" x1="${s.a[0]}" y1="${s.a[1]}" x2="${s.b[0]}" y2="${s.b[1]}"/>`).join('');
+ return `<g>${back}</g><g>${dots}</g><g>${layers}</g><g>${front}</g>${eventLabelsSvg(C,G)}`;
 }
 
 function xmlEsc(s){
@@ -462,12 +467,13 @@ function axesSvg(C,G){
 }
 
 function render(){
- const C=cfg(),G=geometry(C), S=segs(C,G),vd=dash(C.visDashType,C.visDashCustom),hd=dash(C.hidDashType,C.hidDashCustom);
+ const C=cfg(),G=geometry(C), S=segs(C,G),vd=dash(C.visDashType,C.visDashCustom),hd=dash(C.hidDashType,C.hidDashCustom),ld=dash(C.eventLayerStyle,'');
  voxels=voxels.filter(v=>v.x>=0&&v.x<C.nx&&v.y>=0&&v.y<C.ny&&v.z>=0&&v.z<C.nz);
  const sorted=[...voxels].sort((a,b)=>depth(a.x+.5,a.y+.5,a.z+.5,C)-depth(b.x+.5,b.y+.5,b.z+.5,C));
  stage.innerHTML=`<style>
  .v{stroke:${C.visColor};stroke-width:${C.visWidth};stroke-opacity:${C.visOpacity};fill:none;stroke-linecap:round;vector-effect:non-scaling-stroke;${vd?`stroke-dasharray:${vd};`:''}}
  .h{stroke:${C.hidColor};stroke-width:${C.hidWidth};stroke-opacity:${C.hidOpacity};fill:none;stroke-linecap:round;vector-effect:non-scaling-stroke;${hd?`stroke-dasharray:${hd};`:''}}
+ .layer{stroke:${C.visColor};stroke-width:${Math.max(.2,C.visWidth*.82)};stroke-opacity:${C.visOpacity};fill:none;stroke-linecap:round;vector-effect:non-scaling-stroke;${ld?`stroke-dasharray:${ld};`:''}}
  </style><rect width="1100" height="850" fill="${C.bg}"/>
  ${renderMode==='event'?eventStreamSvg(C,G,vd,hd):`<g>${sorted.map(v=>voxelFaces(v,C,G)).join('')}</g>
  <g>${S.filter(s=>!s.visible).map(s=>`<line class="h" x1="${s.a[0]}" y1="${s.a[1]}" x2="${s.b[0]}" y2="${s.b[1]}"/>`).join('')}</g>
@@ -560,7 +566,7 @@ function setRenderMode(mode){
 $('voxelModeBtn').addEventListener('click',()=>setRenderMode('voxel'));
 $('eventModeBtn').addEventListener('click',()=>setRenderMode('event'));
 $('generateEvents').addEventListener('click',generateEventStream);
-['eventRadius','eventOpacity','eventColorA','eventColorB','eventSlices','eventTimeLabel','eventTitle','eventLabels'].forEach(id=>$(id).addEventListener('input',render));
+['eventRadius','eventOpacity','eventColorA','eventColorB','eventSlices','eventLayerStyle','eventTimeLabel','eventTitle','eventLabels'].forEach(id=>$(id).addEventListener('input',render));
 
 $('demo').addEventListener('click',()=>{voxels=[
 {x:0,y:4,z:0,color:'#4eb7bd',alpha:.32},{x:1,y:4,z:0,color:'#4eb7bd',alpha:.32},
@@ -817,7 +823,7 @@ $('savePpt').addEventListener('click',exportEditablePptx);
 
 
 $('saveJson').addEventListener('click',()=>{
- const data={version:9,renderMode,settings:{
+ const data={version:10,renderMode,settings:{
  nx:$('nx').value,ny:$('ny').value,nz:$('nz').value,bgColor:$('bgColor').value,
  projMode:$('projMode').value,obliqueDx:$('obliqueDx').value,obliqueDy:$('obliqueDy').value,zScale:$('zScale').value,
  autoMode:$('autoMode').value,autoCount:$('autoCount').value,autoAlpha:$('autoAlpha').value,autoReplace:$('autoReplace').value,
@@ -828,7 +834,7 @@ $('saveJson').addEventListener('click',()=>{
  axisXColor:$('axisXColor').value,axisYColor:$('axisYColor').value,axisZColor:$('axisZColor').value,
  axisXLabel:$('axisXLabel').value,axisYLabel:$('axisYLabel').value,axisZLabel:$('axisZLabel').value,axisLength:$('axisLength').value,
  eventCount:$('eventCount').value,eventPattern:$('eventPattern').value,eventRedRatio:$('eventRedRatio').value,eventRadius:$('eventRadius').value,eventOpacity:$('eventOpacity').value,
- eventColorA:$('eventColorA').value,eventColorB:$('eventColorB').value,eventSeed:$('eventSeed').value,eventSlices:$('eventSlices').value,
+ eventColorA:$('eventColorA').value,eventColorB:$('eventColorB').value,eventSeed:$('eventSeed').value,eventSlices:$('eventSlices').value,eventLayerStyle:$('eventLayerStyle').value,
  eventTimeLabel:$('eventTimeLabel').value,eventTitle:$('eventTitle').value,eventLabels:$('eventLabels').value
  },view,voxels,eventPoints};
  download(renderMode==='event'?'event_stream_project.json':'voxel_project.json',new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
